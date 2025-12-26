@@ -41,3 +41,8 @@ modprobe v4l2loopback
 
 cd ~
 
+echo "Installing V4L2 command line utilities"
+echo
+apt install v4l-utils
+# v4l2-ctl --list-devices 
+# should include the v4l2loopback virtual device
