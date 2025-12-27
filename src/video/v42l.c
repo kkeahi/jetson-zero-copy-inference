@@ -49,5 +49,12 @@ int main() {
 	// fmt.fmt.pix.width = x, ....
 	// query = ioctl(fd, VIDEOC_S_FMT, &fmt);
 	
+	// close fd
+	query = close(fd);
+	if (query == -1) {
+		fprintf(stderr, "Error closing device fd: %s\n", DEVICE);
+		exit(EXIT_FAILURE);
+	}
+
 	return 0;
 }
