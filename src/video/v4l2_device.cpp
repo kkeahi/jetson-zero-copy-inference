@@ -13,11 +13,12 @@
 #include <string.h> 	// strerror()
 
 #include <cuda_runtime.h>
+#include <linux/dma-buf.h>
 
 namespace jetson_middleware { 
 
 V4L2Device::V4L2Device(const char* path, uint32_t width, uint32_t height, uint32_t format)
-	: _path(path), _width(width), _height(height), _pixel_fmt(format)
+	: _path(path), _width(width), _height(height), _format(format)
 {
 	_fd = open(path, 0);
 	if (_fd < 0) {} // err
@@ -43,58 +44,73 @@ V4L2Device::V4L2Device(const char* path, uint32_t width, uint32_t height, uint32
 	fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	fmt.fmt.pix.width = _width;
 	fmt.fmt.pix.height = _height;
-	fmt.fmt.pix.pixelformat = _pixel_fmt;	// probably V4L2_PIX_FMT_YUYV
+	fmt.fmt.pix.pixelformat = _format;	// probably V4L2_PIX_FMT_YUYV
 	fmt.fmt.pix.field = V4L2_FIELD_NONE;	// may need customization
 	
-	if (xioctl(_fd, VIDEOC_S_FMT, &fmt) < 0) {} // err
+	if (xioctl(_fd, VIDIOC_S_FMT, &fmt) < 0) {} // err
 	
 	// VIDIO_C_FMT may change fmt
 	_width = fmt.fmt.pix.width;
 	_height = fmt.fmt.pix.height;
-	_pixel_fmt = fmt.fmt.pix.pixelformat;
+	_format = fmt.fmt.pix.pixelformat;
 }
 
-V4L2Device::~V4L2Device() {}
-
 void V4L2Device::request_buffers(uint32_t count) {
-	if (!count) {} // err
-	if (!_buffers.empty()) {} // err
+	if (!count) {} 			// err
+	if (!_buffers.empty()) {} 	// err
 	
 	// request buffers //
 	v4l2_requestbuffers req {};
 	req.count = count;
 	req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	req.memory = V4L2_MEMORY_USERPTR; // user pointers to pass to allocate via cuda
+	req.memory = V4L2_MEMORY_MMAP;
 	
-	if (xioctl(fd_, VIDIOC_REQBUFS, &req) < 0) {} // err
-	if (req.count < count) {
-		// driver can alter req
-		count = req.count;
-		if (!count) {} // err
-	}
+	if (xioctl(_fd, VIDIOC_REQBUFS, &req) < 0) {} 	// err
+	if (!req.count) {} 				// err (VIDIOC_REQBUFS can change count)
 
-	_buffers.resize(count);
+	_buffers.resize(req.count);
 
 	// allocate buffers to gpu memory //
-	for (uint32_t i = 0; i < count; ++i) {
+	for (uint32_t i = 0; i < req.count; ++i) {
 		DeviceBuffer& b = _buffers[i];
 		b.index = i;
-		// b.size = ???; bytes/frame -- probably calculate with pixelformat/width/height
-		b.host_ptr = nullptr;
-		b.device_ptr = nullptr;
+		
+		// query buffer metadata //
+		v4l2_buffer buf {};
+		buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+		buf.memory = V4L2_MEMORY_MMAP;
+		buf.index = i;
 
-		if (cudaHostAlloc(&b.host_ptr, b.size, cudaHostAllocMapped) != cudaSuccess) {} 	// err
-		if (cudaHostGetDevicePointer(&b.device_ptr, b.size, 0) != cudaSuccess) {} 	// err
+		if (xioctl(_fd, VIDIOC_QUERYBUF, &buf) < 0) {} // err
+
+		b.size = buf.length;
+
+		// Export buffer as DMA-BUF //
+		v4l2_exportbuffer exp {};
+		exp.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+		exp.index = i;
+		exp.plane = 0;		// single-planar video format
+		exp.flags = O_CLOEXEC;	// ensure fd does not leak across child processes
+
+		if (xioctl(_fd, VIDIOC_EXPBUF, &exp) < 0) {} // err
+
+		b.dmabuf_fd = exp.fd;
+
+		// Import DMA-BUF into CUDA //
+		cudaExternalMemoryHandleDesc hdesc {};
+		hdesc.type = cudaExternalMemoryHandleTypeOpaqueFd;
+		hdesc.handle.fd = b.dmabuf_fd;
+		hdesc.size = b.size;
+
+		if (cudaImportExternalMemory(&b.ext_mem, &hdesc) != cudaSuccess) {} // err
+
+		// Map DMA-BUF into GPU memory //
+		cudaExternalMemoryBufferDesc bdesc {};
+		bdesc.offset = 0;
+		bdesc.size = b.size;
+
+		if (cudaExternalMemoryGetMappedBuffer(&b.device_ptr, b.ext_mem, &bdesc) != cudaSuccess) {} // err
 	}
 }
 
-void V4L2Device::enqueue_frame() {}
-
-// DeviceBuffer& V4L2Device::dequeue_frame() {}
-
-void V4L2Device::start_stream() {}
-
-void V4L2Device::stop_stream() {}
-
-}
 }
