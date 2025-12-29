@@ -16,8 +16,8 @@
 
 namespace jetson_middleware { 
 
-V4L2Device::V4L2Device(const char* path, uint32_t width, uint32_t height)
-	: _path(path), _width(width), _height(height) 
+V4L2Device::V4L2Device(const char* path, uint32_t width, uint32_t height, uint32_t format)
+	: _path(path), _width(width), _height(height), _pixel_fmt(format)
 {
 	_fd = open(path, 0);
 	if (_fd < 0) {} // err
@@ -43,19 +43,18 @@ V4L2Device::V4L2Device(const char* path, uint32_t width, uint32_t height)
 	fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	fmt.fmt.pix.width = _width;
 	fmt.fmt.pix.height = _height;
-	fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;	// may need customization
-	fmt.fmt.pix.field = V4L2_FIELD_NONE;		// may need customization
+	fmt.fmt.pix.pixelformat = _pixel_fmt;	// probably V4L2_PIX_FMT_YUYV
+	fmt.fmt.pix.field = V4L2_FIELD_NONE;	// may need customization
 	
 	if (xioctl(_fd, VIDEOC_S_FMT, &fmt) < 0) {} // err
 	
 	// VIDIO_C_FMT may change fmt
 	_width = fmt.fmt.pix.width;
 	_height = fmt.fmt.pix.height;
-	// may need one for pixelformat
+	_pixel_fmt = fmt.fmt.pix.pixelformat;
 }
 
-V4L2Device::~V4L2Device() {
-}
+V4L2Device::~V4L2Device() {}
 
 void V4L2Device::request_buffers(uint32_t count) {
 	if (!count) {} // err
@@ -84,7 +83,8 @@ void V4L2Device::request_buffers(uint32_t count) {
 		b.host_ptr = nullptr;
 		b.device_ptr = nullptr;
 
-				
+		if (cudaHostAlloc(&b.host_ptr, b.size, cudaHostAllocMapped) != cudaSuccess) {} 	// err
+		if (cudaHostGetDevicePointer(&b.device_ptr, b.size, 0) != cudaSuccess) {} 	// err
 	}
 }
 
