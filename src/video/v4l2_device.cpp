@@ -141,8 +141,28 @@ void V4L2Device::prime_buffers() {
 	for (auto& b : _buffers) {
 		buf.index = b.index;
 		if (xioctl(_fd, VIDIOC_QBUF, &buf) < 0)
-			std::runtime_error("Error: failed to prime buffers (VIDIOC_QBUF)");
+			throw std::runtime_error("Error: failed to prime buffers (VIDIOC_QBUF)");
 	}
+}
+
+void V4L2Device::start_stream() {
+	if (!_buffers.size()) // May need to check if buffers are primed too
+		throw std::runtime_error("Error: must call request_buffers and prime_buffers before streaming");
+
+	enum v4l2_buf_type type;
+	type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+	if (xioctl(_fd, VIDIOC_STREAMON, &type) < 0)
+		throw std::runtime_error("Error: VIDIOC_STREAMON");
+}
+
+void V4L2Device::stop_stream() {
+	// May need some checks to make sure device is streaming	
+	enum v4l2_buf_type type;
+	type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+	if (xioctl(_fd, VIDIOC_STREAMOFF, &type) < 0)
+		throw std::runtime_error("Error: VIDIOC_STREAMOFF");
 }
 
 }
