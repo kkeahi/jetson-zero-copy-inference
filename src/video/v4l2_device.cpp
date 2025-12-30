@@ -165,4 +165,14 @@ void V4L2Device::stop_stream() {
 		throw std::runtime_error("Error: VIDIOC_STREAMOFF");
 }
 
+DeviceBuffer& V4L2Device::aquire_buffer() {
+	// Add check to make sure device is streaming
+	v4l2_buffer buf {};
+	buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	buf.memory = V4L2_MEMORY_MMAP;
+	
+	if (xioctl(_fd, VIDIOC_DQBUF, &buf))
+		throw std::runtime_error("Error: aquire_buffer() VIDIOC_DQBUF");
+
+	return _buffers[buf.index];
 }
